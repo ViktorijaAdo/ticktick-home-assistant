@@ -27,6 +27,13 @@ create_task:
       example: 6987a8plg0rad90bc38b672f
       selector:
         text: null
+    parentId:
+      name: Parent ID
+      description: ID of the parent task in TickTick if this is a subtask.
+      required: false
+      example: 63b7bebb91c0a5474805fcd4
+      selector:
+        text: null
     title:
       name: Title
       description: "Task title."
@@ -97,6 +104,37 @@ create_task:
         number:
           min: 0
           max: 1000
+copy_task:
+  name: Copy Task
+  description: "Copies a task and all its subtasks to another project, with optional subtask updates."
+  fields:
+    source_project_id:
+      name: Source Project ID
+      description: ID of the source project.
+      required: true
+      example: 6987a8plg0rad90bc38b672f
+      selector:
+        text: null
+    source_task_id:
+      name: Source Task ID
+      description: ID of the source task to copy.
+      required: true
+      example: 63b7bebb91c0a5474805fcd4
+      selector:
+        text: null
+    dest_project_id:
+      name: Destination Project ID
+      description: ID of the destination project.
+      required: true
+      example: 6987a8plg0rad90bc38b672f
+      selector:
+        text: null
+    subtask_updates:
+      name: Subtask Updates
+      description: "List of updates to apply to subtasks based on their title."
+      required: false
+      selector:
+        object: {}
 complete_task:
   name: Complete Task
   description: "Sets a task as done, completes a task in TickTick"
@@ -225,6 +263,13 @@ update_task:
       name: Task ID
       description: ID of the task in TickTick.
       required: true
+      example: 63b7bebb91c0a5474805fcd4
+      selector:
+        text: null
+    parentId:
+      name: Parent ID
+      description: ID of the parent task in TickTick.
+      required: false
       example: 63b7bebb91c0a5474805fcd4
       selector:
         text: null
