@@ -16,6 +16,7 @@ from .const import DOMAIN
 from .coordinator import TickTickCoordinator
 from .service_handlers import (
     handle_complete_task,
+    handle_copy_task,
     handle_create_task,
     handle_delete_task,
     handle_get_projects,
@@ -121,6 +122,13 @@ async def register_services(
         "update_task",
         await handle_update_task(tickTickApiClient),
         supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "copy_task",
+        await handle_copy_task(tickTickApiClient),
+        supports_response=SupportsResponse.ONLY,
     )
 
     hass.services.async_register(

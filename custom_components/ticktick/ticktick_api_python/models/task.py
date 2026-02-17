@@ -28,6 +28,7 @@ class Task(CheckListItem):
         projectId: str,
         title: str,
         id: str | None = None,
+        parentId: str | None = None,
         desc: str | None = None,
         content: str | None = None,
         priority: TaskPriority | None = None,
@@ -58,6 +59,7 @@ class Task(CheckListItem):
             status,
         )
         self.projectId = projectId
+        self.parentId = parentId
         self.content = content
         self.desc = desc
         self.dueDate = dueDate
@@ -128,6 +130,7 @@ class Task(CheckListItem):
             if data.get("title")
             else "Unnamed Task",
             id=data.get("id"),
+            parentId=data.get("parentId"),
             desc=data.get("desc"),
             content=data.get("content"),
             priority=TaskPriority(data.get("priority", TaskPriority.NONE.value)),

@@ -41,6 +41,98 @@ async def handle_delete_task(client: TickTickAPIClient) -> Callable:
     return await _create_handler(client.delete_task, PROJECT_ID, TASK_ID)
 
 
+async def handle_copy_task(client: TickTickAPIClient) -> Callable:
+    """Return a handler function for the 'copy_task' service."""
+
+    async def handler(call: ServiceCall) -> dict[str, Any]:
+        """Handle the copy_task service call."""
+        source_project_id = call.data.get("source_project_id")
+        source_task_id = call.data.get("source_task_id")
+        dest_project_id = call.data.get("dest_project_id")
+        subtask_updates = call.data.get("subtask_updates", [])
+
+        if not source_project_id or not source_task_id or not dest_project_id:
+            return {
+                "error": "source_project_id, source_task_id, and dest_project_id are required"
+            }
+
+        try:
+            # 1. Get all tasks for source project to find descendants
+            source_project_data = await client.get_project_with_tasks(source_project_id)
+            all_tasks = source_project_data.tasks
+            if all_tasks is None:
+                return {
+                    "error": f"No tasks found in source project {source_project_id}"
+                }
+
+            # 2. Find the source task
+            source_task = next((t for t in all_tasks if t.id == source_task_id), None)
+            if not source_task:
+                return {
+                    "error": f"Source task {source_task_id} not found in project {source_project_id}"
+                }
+
+            # 3. Recursive copy function
+            async def do_copy(task: Task, new_parent_id: str | None = None) -> str:
+                target_priority = task.priority
+                target_due_date = task.dueDate
+
+                # Check for overrides by title
+                if subtask_updates:
+                    for update in subtask_updates:
+                        if update.get("title") == task.title:
+                            if "priority" in update:
+                                try:
+                                    target_priority = TaskPriority[update["priority"]]
+                                except KeyError:
+                                    _LOGGER.warning(
+                                        "Invalid priority '%s' for subtask '%s'",
+                                        update["priority"],
+                                        task.title,
+                                    )
+                            if "dueDate" in update:
+                                target_due_date = _sanitize_date(
+                                    update["dueDate"], update.get("timeZone")
+                                )
+
+                # Create the new task object
+                new_task = Task(
+                    projectId=dest_project_id,
+                    title=task.title,
+                    content=task.content,
+                    desc=task.desc,
+                    priority=target_priority,
+                    dueDate=target_due_date,
+                    parentId=new_parent_id,
+                    isAllDay=task.isAllDay,
+                    startDate=task.startDate,
+                    timeZone=task.timeZone,
+                    reminders=task.reminders,
+                    repeatFlag=task.repeatFlag,
+                    items=task.items,  # Checklist items
+                )
+
+                # Create task in TickTick
+                created_task_json = await client.create_task(new_task, returnAsJson=True)
+                new_task_id = created_task_json.get("id")
+
+                # Find and copy children
+                children = [t for t in all_tasks if t.parentId == task.id]
+                for child in children:
+                    await do_copy(child, new_task_id)
+
+                return new_task_id
+
+            new_root_id = await do_copy(source_task)
+            return {"data": {"new_task_id": new_root_id}}
+
+        except Exception as e:
+            _LOGGER.error("Error copying task: %s", str(e))
+            return {"error": str(e)}
+
+    return handler
+
+
 async def handle_update_task(client: TickTickAPIClient) -> Callable:
     """Return a handler function for the 'update_task' endpoint."""
     async def handler(call: ServiceCall) -> dict[str, Any]:
@@ -136,6 +228,10 @@ async def handle_update_task(client: TickTickAPIClient) -> Callable:
             if "sortOrder" in call.data:
                 existing_task.sortOrder = call.data.get("sortOrder")
                 _LOGGER.debug("Updating task sort order to: %s", existing_task.sortOrder)
+
+            if "parentId" in call.data:
+                existing_task.parentId = call.data.get("parentId")
+                _LOGGER.debug("Updating task parentId to: %s", existing_task.parentId)
             
             # Update the task in TickTick
             response = await client.update_task(existing_task, returnAsJson=True)
