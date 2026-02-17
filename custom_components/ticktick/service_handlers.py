@@ -82,12 +82,19 @@ async def handle_copy_task(client: TickTickAPIClient) -> Callable:
                     for update in subtask_updates:
                         if update.get("title") == task.title:
                             if "priority" in update:
+                                priority_val = update["priority"]
                                 try:
-                                    target_priority = TaskPriority[update["priority"]]
-                                except KeyError:
+                                    if isinstance(priority_val, str):
+                                        if priority_val.isdigit():
+                                            target_priority = TaskPriority(int(priority_val))
+                                        else:
+                                            target_priority = TaskPriority[priority_val]
+                                    else:
+                                        target_priority = TaskPriority(priority_val)
+                                except (KeyError, ValueError):
                                     _LOGGER.warning(
                                         "Invalid priority '%s' for subtask '%s'",
-                                        update["priority"],
+                                        priority_val,
                                         task.title,
                                     )
                             if "dueDate" in update:
@@ -214,16 +221,18 @@ async def handle_update_task(client: TickTickAPIClient) -> Callable:
                     _LOGGER.debug("Clearing task reminders")
             
             if "priority" in call.data:
-                priority = call.data.get("priority")
-                if isinstance(priority, str):
-                    try:
-                        existing_task.priority = TaskPriority[priority]
-                        _LOGGER.debug("Updating task priority to: %s", existing_task.priority)
-                    except KeyError:
-                        _LOGGER.warning("Invalid priority value: %s. Ignoring.", priority)
-                else:
-                    existing_task.priority = priority
+                priority_val = call.data.get("priority")
+                try:
+                    if isinstance(priority_val, str):
+                        if priority_val.isdigit():
+                            existing_task.priority = TaskPriority(int(priority_val))
+                        else:
+                            existing_task.priority = TaskPriority[priority_val]
+                    else:
+                        existing_task.priority = TaskPriority(priority_val)
                     _LOGGER.debug("Updating task priority to: %s", existing_task.priority)
+                except (KeyError, ValueError):
+                    _LOGGER.warning("Invalid priority value: %s. Ignoring.", priority_val)
             
             if "sortOrder" in call.data:
                 existing_task.sortOrder = call.data.get("sortOrder")
@@ -273,10 +282,17 @@ async def _create_handler(
                     args["startDate"] = _sanitize_date(
                         args["startDate"], args["timeZone"]
                     )
-                if "priority" in args and isinstance(args["priority"], str):
+                if "priority" in args and args["priority"] is not None:
+                    priority_val = args["priority"]
                     try:
-                        args["priority"] = TaskPriority[args["priority"]]
-                    except Exception:
+                        if isinstance(priority_val, str):
+                            if priority_val.isdigit():
+                                args["priority"] = TaskPriority(int(priority_val))
+                            else:
+                                args["priority"] = TaskPriority[priority_val]
+                        else:
+                            args["priority"] = TaskPriority(priority_val)
+                    except (KeyError, ValueError):
                         args["priority"] = None
                 instance = type(**args)
                 response = await client_method(instance, returnAsJson=True)

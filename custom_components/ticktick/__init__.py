@@ -128,7 +128,7 @@ async def register_services(
         DOMAIN,
         "copy_task",
         await handle_copy_task(tickTickApiClient),
-        supports_response=SupportsResponse.ONLY,
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
