@@ -53,17 +53,23 @@ class TickTickAPIClient:
 
         return Task.from_dict(response)
 
-    async def complete_task(self, projectId: str, taskId: str) -> str:
+    async def complete_task(
+        self, projectId: str, taskId: str, returnAsJson: bool = False
+    ) -> str:
         """Complete a task."""
-        return await self._post(
+        response = await self._post(
             COMPLETE_TASK.format(projectId=projectId, taskId=taskId)
         )
+        return response
 
-    async def delete_task(self, projectId: str, taskId: str) -> str:
+    async def delete_task(
+        self, projectId: str, taskId: str, returnAsJson: bool = False
+    ) -> str:
         """Delete a task."""
-        return await self._delete(
+        response = await self._delete(
             DELETE_TASK.format(projectId=projectId, taskId=taskId)
         )
+        return response
 
     # === Project Scope ===
     async def get_projects(self, returnAsJson: bool = False) -> list[Project]:

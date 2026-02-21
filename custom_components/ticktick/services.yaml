@@ -16,6 +16,24 @@ get_task:
       example: 63b7bebb91c0a5474805fcd4
       selector:
         text: null
+delete_task_with_subtasks:
+  name: Delete Task with Subtasks
+  description: "Deletes a task and all its subtasks from TickTick"
+  fields:
+    projectId:
+      name: Project ID
+      description: ID of the project (list) of tasks in TickTick.
+      required: true
+      example: 6987a8plg0rad90bc38b672f
+      selector:
+        text: null
+    taskId:
+      name: Task ID
+      description: ID of the task in TickTick.
+      required: true
+      example: 63b7bebb91c0a5474805fcd4
+      selector:
+        text: null
 create_task:
   name: Create Task
   description: "Creates a task in TickTick."

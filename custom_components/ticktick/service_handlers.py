@@ -1,5 +1,6 @@
 """Service Handlers for TickTick Integration."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 import logging
@@ -39,6 +40,62 @@ async def handle_complete_task(client: TickTickAPIClient) -> Callable:
 async def handle_delete_task(client: TickTickAPIClient) -> Callable:
     """Return a handler function for the 'delete_task' endpoint."""
     return await _create_handler(client.delete_task, PROJECT_ID, TASK_ID)
+
+
+async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callable:
+    """Return a handler function for the 'delete_task_with_subtasks' service."""
+
+    async def handler(call: ServiceCall) -> dict[str, Any]:
+        """Handle the delete_task_with_subtasks service call."""
+        project_id = call.data.get(PROJECT_ID)
+        task_id = call.data.get(TASK_ID)
+
+        if not project_id or not task_id:
+            return {"error": f"Both {PROJECT_ID} and {TASK_ID} are required"}
+
+        try:
+            # 1. Get all tasks for project to find descendants
+            project_data = await client.get_project_with_tasks(project_id)
+            all_tasks = project_data.tasks
+            if all_tasks is None:
+                # If no tasks found, maybe it's already deleted or empty, but let's try to delete the target anyway
+                await client.delete_task(project_id, task_id)
+                return {"data": {"status": "Success", "deleted_subtasks": 0}}
+
+            # 2. Find descendants
+            descendants = []
+
+            def find_descendants(parent_id):
+                children = [t for t in all_tasks if t.parentId == parent_id]
+                for child in children:
+                    descendants.append(child)
+                    find_descendants(child.id)
+
+            find_descendants(task_id)
+
+            # 3. Delete descendants (subtasks) concurrently
+            delete_tasks = [
+                client.delete_task(project_id, subtask.id) for subtask in descendants
+            ]
+            if delete_tasks:
+                await asyncio.gather(*delete_tasks)
+
+            # 4. Delete the target task
+            response = await client.delete_task(project_id, task_id, returnAsJson=True)
+
+            return {
+                "data": {
+                    "status": "Success",
+                    "response": response,
+                    "deleted_subtasks": len(descendants),
+                }
+            }
+
+        except Exception as e:
+            _LOGGER.error("Error deleting task with subtasks: %s", str(e))
+            return {"error": str(e)}
+
+    return handler
 
 
 async def handle_copy_task(client: TickTickAPIClient) -> Callable:
@@ -82,12 +139,19 @@ async def handle_copy_task(client: TickTickAPIClient) -> Callable:
                     for update in subtask_updates:
                         if update.get("title") == task.title:
                             if "priority" in update:
+                                priority_val = update["priority"]
                                 try:
-                                    target_priority = TaskPriority[update["priority"]]
-                                except KeyError:
+                                    if isinstance(priority_val, str):
+                                        if priority_val.isdigit():
+                                            target_priority = TaskPriority(int(priority_val))
+                                        else:
+                                            target_priority = TaskPriority[priority_val]
+                                    else:
+                                        target_priority = TaskPriority(priority_val)
+                                except (KeyError, ValueError):
                                     _LOGGER.warning(
                                         "Invalid priority '%s' for subtask '%s'",
-                                        update["priority"],
+                                        priority_val,
                                         task.title,
                                     )
                             if "dueDate" in update:
@@ -214,16 +278,18 @@ async def handle_update_task(client: TickTickAPIClient) -> Callable:
                     _LOGGER.debug("Clearing task reminders")
             
             if "priority" in call.data:
-                priority = call.data.get("priority")
-                if isinstance(priority, str):
-                    try:
-                        existing_task.priority = TaskPriority[priority]
-                        _LOGGER.debug("Updating task priority to: %s", existing_task.priority)
-                    except KeyError:
-                        _LOGGER.warning("Invalid priority value: %s. Ignoring.", priority)
-                else:
-                    existing_task.priority = priority
+                priority_val = call.data.get("priority")
+                try:
+                    if isinstance(priority_val, str):
+                        if priority_val.isdigit():
+                            existing_task.priority = TaskPriority(int(priority_val))
+                        else:
+                            existing_task.priority = TaskPriority[priority_val]
+                    else:
+                        existing_task.priority = TaskPriority(priority_val)
                     _LOGGER.debug("Updating task priority to: %s", existing_task.priority)
+                except (KeyError, ValueError):
+                    _LOGGER.warning("Invalid priority value: %s. Ignoring.", priority_val)
             
             if "sortOrder" in call.data:
                 existing_task.sortOrder = call.data.get("sortOrder")
@@ -273,10 +339,17 @@ async def _create_handler(
                     args["startDate"] = _sanitize_date(
                         args["startDate"], args["timeZone"]
                     )
-                if "priority" in args and isinstance(args["priority"], str):
+                if "priority" in args and args["priority"] is not None:
+                    priority_val = args["priority"]
                     try:
-                        args["priority"] = TaskPriority[args["priority"]]
-                    except Exception:
+                        if isinstance(priority_val, str):
+                            if priority_val.isdigit():
+                                args["priority"] = TaskPriority(int(priority_val))
+                            else:
+                                args["priority"] = TaskPriority[priority_val]
+                        else:
+                            args["priority"] = TaskPriority(priority_val)
+                    except (KeyError, ValueError):
                         args["priority"] = None
                 instance = type(**args)
                 response = await client_method(instance, returnAsJson=True)
