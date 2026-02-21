@@ -1,5 +1,6 @@
 """Service Handlers for TickTick Integration."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 import logging
@@ -39,6 +40,62 @@ async def handle_complete_task(client: TickTickAPIClient) -> Callable:
 async def handle_delete_task(client: TickTickAPIClient) -> Callable:
     """Return a handler function for the 'delete_task' endpoint."""
     return await _create_handler(client.delete_task, PROJECT_ID, TASK_ID)
+
+
+async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callable:
+    """Return a handler function for the 'delete_task_with_subtasks' service."""
+
+    async def handler(call: ServiceCall) -> dict[str, Any]:
+        """Handle the delete_task_with_subtasks service call."""
+        project_id = call.data.get(PROJECT_ID)
+        task_id = call.data.get(TASK_ID)
+
+        if not project_id or not task_id:
+            return {"error": f"Both {PROJECT_ID} and {TASK_ID} are required"}
+
+        try:
+            # 1. Get all tasks for project to find descendants
+            project_data = await client.get_project_with_tasks(project_id)
+            all_tasks = project_data.tasks
+            if all_tasks is None:
+                # If no tasks found, maybe it's already deleted or empty, but let's try to delete the target anyway
+                await client.delete_task(project_id, task_id)
+                return {"data": {"status": "Success", "deleted_subtasks": 0}}
+
+            # 2. Find descendants
+            descendants = []
+
+            def find_descendants(parent_id):
+                children = [t for t in all_tasks if t.parentId == parent_id]
+                for child in children:
+                    descendants.append(child)
+                    find_descendants(child.id)
+
+            find_descendants(task_id)
+
+            # 3. Delete descendants (subtasks) concurrently
+            delete_tasks = [
+                client.delete_task(project_id, subtask.id) for subtask in descendants
+            ]
+            if delete_tasks:
+                await asyncio.gather(*delete_tasks)
+
+            # 4. Delete the target task
+            response = await client.delete_task(project_id, task_id, returnAsJson=True)
+
+            return {
+                "data": {
+                    "status": "Success",
+                    "response": response,
+                    "deleted_subtasks": len(descendants),
+                }
+            }
+
+        except Exception as e:
+            _LOGGER.error("Error deleting task with subtasks: %s", str(e))
+            return {"error": str(e)}
+
+    return handler
 
 
 async def handle_copy_task(client: TickTickAPIClient) -> Callable:
