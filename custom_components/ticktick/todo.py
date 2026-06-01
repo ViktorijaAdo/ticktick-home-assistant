@@ -51,7 +51,7 @@ def _format_date_for_comparison(date_value) -> str:
 def _extract_metadata_from_description(description: str) -> tuple[str, dict]:
     """Extract content and metadata from description.
     
-    Format: "content | _META_:{\"priority\":\"HIGH\",\"labels\":[...],\"parent_task_id\":\"...\"}"
+    Format: "content | _META_:{\"priority\":\"HIGH\",\"tags\":[...],\"parent_task_id\":\"...\"}"
     
     Returns:
         Tuple of (clean_content, metadata_dict)
@@ -116,10 +116,10 @@ def _map_task(
             except KeyError:
                 pass  # Invalid priority, ignore
         
-        # Handle labels from metadata
-        if "labels" in item_metadata:
-            if api_task.labels != item_metadata["labels"]:
-                api_task.labels = item_metadata["labels"]
+        # Handle tags from metadata
+        if "tags" in item_metadata:
+            if api_task.tags != item_metadata["tags"]:
+                api_task.tags = item_metadata["tags"]
                 modified = True
         
         # Handle parent_task_id from metadata
@@ -146,8 +146,8 @@ def _map_task(
         except (KeyError, ValueError):
             pass
     
-    if "labels" in item_metadata:
-        metadata["labels"] = item_metadata["labels"]
+    if "tags" in item_metadata:
+        metadata["tags"] = item_metadata["tags"]
     
     if "parent_task_id" in item_metadata:
         metadata["parent_task_id"] = item_metadata["parent_task_id"]
@@ -212,8 +212,8 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                     if task.priority and task.priority != TaskPriority.NONE:
                         metadata["priority"] = task.priority.name
                     
-                    if hasattr(task, 'labels') and task.labels:
-                        metadata["labels"] = task.labels
+                    if hasattr(task, "tags") and task.tags:
+                        metadata["tags"] = task.tags
                     
                     if task.parentId:
                         metadata["parent_task_id"] = task.parentId
