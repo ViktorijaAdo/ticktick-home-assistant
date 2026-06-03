@@ -1,7 +1,7 @@
 import asyncio
 import json
 from typing import Any
-from datetime import datetime
+from datetime import date, datetime
 
 from custom_components.ticktick.coordinator import TickTickCoordinator
 from custom_components.ticktick.ticktick_api_python.models.task import Task, TaskStatus, TaskPriority
@@ -105,7 +105,17 @@ def _map_task(
         if (item_content or "").strip() != (api_task.content or "").strip():
             api_task.content = item_content or None
             modified = True
-        
+
+        # Handle isAllDay based on due date type
+        is_all_day = (
+            item.due is not None
+            and not isinstance(item.due, datetime)
+            and isinstance(item.due, date)
+        )
+        if api_task.isAllDay != is_all_day:
+            api_task.isAllDay = is_all_day
+            modified = True
+
         # Handle priority from metadata
         if "priority" in item_metadata:
             try:
@@ -131,14 +141,20 @@ def _map_task(
         # Handle due date comparison with proper type checking
         item_due_str = _format_date_for_comparison(item.due)
         api_due_str = _format_date_for_comparison(api_task.dueDate)
-        
+
         if item_due_str != api_due_str:
             api_task.dueDate = item.due
             modified = True
-            
+
         return api_task, modified
-    
+
     # Create new task
+    is_all_day = (
+        item.due is not None
+        and not isinstance(item.due, datetime)
+        and isinstance(item.due, date)
+    )
+
     metadata = {}
     if "priority" in item_metadata:
         try:
@@ -157,7 +173,10 @@ def _map_task(
         title=item.summary,
         content=item_content or None,
         dueDate=item.due,
-        priority=TaskPriority[metadata.get("priority", "NONE")] if "priority" in metadata else None,
+        isAllDay=is_all_day,
+        priority=TaskPriority[metadata.get("priority", "NONE")]
+        if "priority" in metadata
+        else None,
         parentId=metadata.get("parent_task_id"),
     ), modified
 

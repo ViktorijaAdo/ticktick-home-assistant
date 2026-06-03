@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import IntFlag
 
 
@@ -57,11 +57,13 @@ class CheckListItem:
     def to_dict(self) -> dict:
         """Convert this checklist item to a JSON-ready dict."""
         def _tt_datetime(val):
-            """Convert datetime/int/str to TickTick-compatible string."""
+            """Convert datetime/date/int/str to TickTick-compatible string."""
             if val is None:
                 return None
             if isinstance(val, datetime):
                 s = val.isoformat()
+            elif isinstance(val, date):
+                return val.isoformat() + "T00:00:00+0000"
             elif isinstance(val, int):
                 # TickTick usually uses ms timestamps
                 s = datetime.fromtimestamp(val / 1000).isoformat()
