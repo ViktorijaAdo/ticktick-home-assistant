@@ -235,8 +235,7 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                         )
                     )
 
-            if tasks_to_add:
-                self._attr_todo_items = tasks_to_add
+            self._attr_todo_items = tasks_to_add
 
         super()._handle_coordinator_update()
 
@@ -245,8 +244,19 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
         if item.status != TodoItemStatus.NEEDS_ACTION:
             raise ValueError("Only active tasks may be created.")
         mapped_task, _ = _map_task(item, self._project_id)
-        await self.coordinator.api.create_task(mapped_task)
-        await self.coordinator.async_refresh()
+        created_task = await self.coordinator.api.create_task(mapped_task)
+
+        # Update local state optimistically
+        if self.coordinator.data:
+            for project_with_tasks in self.coordinator.data:
+                if project_with_tasks.project.id == self._project_id:
+                    if project_with_tasks.tasks is None:
+                        project_with_tasks.tasks = []
+                    project_with_tasks.tasks.append(created_task)
+                    self.coordinator.async_set_updated_data(self.coordinator.data)
+                    break
+
+        self.coordinator.async_request_refresh()
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update a To-do item."""
@@ -263,6 +273,23 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                             await self.coordinator.api.complete_task(
                                 projectId=self._project_id, taskId=item.uid
                             )
+                            # Update local state optimistically by removing the completed task
+                            if self.coordinator.data:
+                                for project_with_tasks in self.coordinator.data:
+                                    if (
+                                        project_with_tasks.project.id
+                                        == self._project_id
+                                        and project_with_tasks.tasks is not None
+                                    ):
+                                        project_with_tasks.tasks = [
+                                            t
+                                            for t in project_with_tasks.tasks
+                                            if t.id != item.uid
+                                        ]
+                                        self.coordinator.async_set_updated_data(
+                                            self.coordinator.data
+                                        )
+                                        break
                             return True
                         # else:
                         # Not supported by TickTick as they don't return completed tasks
@@ -281,15 +308,30 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
         )
 
         if await process_status_change():  # This should be changed if completing the task will support also changing description etc.
-            await self.coordinator.async_refresh()
+            self.coordinator.async_request_refresh()
             return
 
         mapped_task, is_modified = _map_task(item, self._project_id, api_task)
 
         if is_modified:
-            await self.coordinator.api.update_task(mapped_task)
+            updated_task = await self.coordinator.api.update_task(mapped_task)
+            # Update local state optimistically
+            if self.coordinator.data:
+                for project_with_tasks in self.coordinator.data:
+                    if (
+                        project_with_tasks.project.id == self._project_id
+                        and project_with_tasks.tasks is not None
+                    ):
+                        for i, task in enumerate(project_with_tasks.tasks):
+                            if task.id == updated_task.id:
+                                project_with_tasks.tasks[i] = updated_task
+                                self.coordinator.async_set_updated_data(
+                                    self.coordinator.data
+                                )
+                                break
+                        break
 
-        await self.coordinator.async_refresh()
+        self.coordinator.async_request_refresh()
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Delete a To-do item."""
@@ -299,7 +341,19 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                 for uid in uids
             ]
         )
-        await self.coordinator.async_refresh()
+        # Update local state optimistically
+        if self.coordinator.data:
+            for project_with_tasks in self.coordinator.data:
+                if (
+                    project_with_tasks.project.id == self._project_id
+                    and project_with_tasks.tasks is not None
+                ):
+                    project_with_tasks.tasks = [
+                        t for t in project_with_tasks.tasks if t.id not in uids
+                    ]
+                    self.coordinator.async_set_updated_data(self.coordinator.data)
+                    break
+        self.coordinator.async_request_refresh()
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass update state from existing coordinator data."""
