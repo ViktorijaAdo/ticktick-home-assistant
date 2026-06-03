@@ -61,9 +61,9 @@ class CheckListItem:
             if val is None:
                 return None
             if isinstance(val, datetime):
-                s = val.isoformat()
+                s = val.strftime("%Y-%m-%dT%H:%M:%S%z")
             elif isinstance(val, date):
-                return val.isoformat() + "T00:00:00+0000"
+                return val.strftime("%Y-%m-%dT00:00:00+0000")
             elif isinstance(val, int):
                 # TickTick usually uses ms timestamps
                 s = datetime.fromtimestamp(val / 1000).isoformat()

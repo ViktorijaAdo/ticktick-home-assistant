@@ -84,14 +84,8 @@ class Task(CheckListItem):
         @staticmethod
         def _handle_datetime(value):
             """Handle special cases for JSON serialization."""
-            if isinstance(value, datetime):
-                # Removing `:` from the timezone information as TickTick doesnt accept them
-                s = value.isoformat()
-                if len(s) >= 6 and s[-3] == ":" and (s[-6] in "+-"):
-                    return s[:-3] + s[-2:]
-                return s
-            if isinstance(value, date):
-                return value.isoformat() + "T00:00:00+0000"
+            if isinstance(value, (datetime, date)):
+                return value.strftime("%Y-%m-%dT%H:%M:%S%z") if isinstance(value, datetime) else value.strftime("%Y-%m-%dT00:00:00+0000")
             if isinstance(value, Enum):
                 return value.value
             return value
