@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 import inspect
 import json
@@ -84,10 +84,8 @@ class Task(CheckListItem):
         @staticmethod
         def _handle_datetime(value):
             """Handle special cases for JSON serialization."""
-            if isinstance(value, datetime):
-                # Removing `:` from the timezone information as TickTick doesnt accept them
-                modified_date = value.isoformat().rsplit(":", 1)
-                return modified_date[0] + modified_date[1]
+            if isinstance(value, (datetime, date)):
+                return value.strftime("%Y-%m-%dT%H:%M:%S%z") if isinstance(value, datetime) else value.strftime("%Y-%m-%dT00:00:00+0000")
             if isinstance(value, Enum):
                 return value.value
             return value
