@@ -124,7 +124,7 @@ async def register_services(
     hass.services.async_register(
         DOMAIN,
         "delete_task_with_subtasks",
-        await handle_delete_task_with_subtasks(tickTickApiClient),
+        await handle_delete_task_with_subtasks(tickTickApiClient, coordinator),
         supports_response=SupportsResponse.OPTIONAL,
     )
 

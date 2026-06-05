@@ -55,7 +55,9 @@ async def handle_delete_task(
     )
 
 
-async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callable:
+async def handle_delete_task_with_subtasks(
+    client: TickTickAPIClient, coordinator: TickTickCoordinator
+) -> Callable:
     """Return a handler function for the 'delete_task_with_subtasks' service."""
 
     async def handler(call: ServiceCall) -> dict[str, Any]:
@@ -73,6 +75,7 @@ async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callabl
             if all_tasks is None:
                 # If no tasks found, maybe it's already deleted or empty, but let's try to delete the target anyway
                 await client.delete_task(project_id, task_id)
+                coordinator.async_request_refresh()
                 return {"data": {"status": "Success", "deleted_subtasks": 0}}
 
             # 2. Find descendants
@@ -95,6 +98,8 @@ async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callabl
 
             # 4. Delete the target task
             response = await client.delete_task(project_id, task_id, returnAsJson=True)
+
+            coordinator.async_request_refresh()
 
             return {
                 "data": {
@@ -157,7 +162,9 @@ async def handle_copy_task(
                                 try:
                                     if isinstance(priority_val, str):
                                         if priority_val.isdigit():
-                                            target_priority = TaskPriority(int(priority_val))
+                                            target_priority = TaskPriority(
+                                                int(priority_val)
+                                            )
                                         else:
                                             target_priority = TaskPriority[priority_val]
                                     else:
@@ -305,9 +312,13 @@ async def handle_update_task(
                             existing_task.priority = TaskPriority[priority_val]
                     else:
                         existing_task.priority = TaskPriority(priority_val)
-                    _LOGGER.debug("Updating task priority to: %s", existing_task.priority)
+                    _LOGGER.debug(
+                        "Updating task priority to: %s", existing_task.priority
+                    )
                 except (KeyError, ValueError):
-                    _LOGGER.warning("Invalid priority value: %s. Ignoring.", priority_val)
+                    _LOGGER.warning(
+                        "Invalid priority value: %s. Ignoring.", priority_val
+                    )
             
             if "sortOrder" in call.data:
                 existing_task.sortOrder = call.data.get("sortOrder")
