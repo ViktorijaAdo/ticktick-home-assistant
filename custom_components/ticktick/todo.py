@@ -1,9 +1,10 @@
 import asyncio
+import json
 from typing import Any
-from datetime import datetime
+from datetime import date, datetime
 
 from custom_components.ticktick.coordinator import TickTickCoordinator
-from custom_components.ticktick.ticktick_api_python.models.task import Task, TaskStatus
+from custom_components.ticktick.ticktick_api_python.models.task import Task, TaskStatus, TaskPriority
 
 from homeassistant.components.todo import (
     TodoItem,
@@ -17,6 +18,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+
+# JSON metadata separator
+METADATA_SEPARATOR = " | _META_:"
 
 
 async def async_setup_entry(
@@ -44,33 +48,136 @@ def _format_date_for_comparison(date_value) -> str:
     return str(date_value).strip()
 
 
+def _extract_metadata_from_description(description: str) -> tuple[str, dict]:
+    """Extract content and metadata from description.
+    
+    Format: "content | _META_:{\"priority\":\"HIGH\",\"tags\":[...],\"parent_task_id\":\"...\"}"
+    
+    Returns:
+        Tuple of (clean_content, metadata_dict)
+    """
+    if not description:
+        return "", {}
+    
+    if METADATA_SEPARATOR not in description:
+        return description, {}
+    
+    try:
+        content, meta_str = description.rsplit(METADATA_SEPARATOR, 1)
+        metadata = json.loads(meta_str)
+        return content.strip(), metadata
+    except (json.JSONDecodeError, ValueError):
+        # If JSON parsing fails, return the whole description as content
+        return description, {}
+
+
+def _format_description_with_metadata(content: str, metadata: dict) -> str:
+    """Format content and metadata into a description string.
+    
+    Returns:
+        Formatted description with JSON metadata
+    """
+    if not metadata:
+        return content or ""
+    
+    # Filter out empty/None values
+    filtered_metadata = {k: v for k, v in metadata.items() if v is not None and v != ""}
+    
+    if not filtered_metadata:
+        return content or ""
+    
+    return f"{content}{METADATA_SEPARATOR}{json.dumps(filtered_metadata)}"
+
+
 def _map_task(
     item: TodoItem, projectId: str, api_task: Task | None = None
 ) -> tuple[Task, bool]:
     """Convert a TodoItem to Task."""
     modified = False
+    
+    # Extract metadata from item description
+    item_content, item_metadata = _extract_metadata_from_description(item.description or "")
+    
     if api_task:
         if (item.summary or "").strip() != (api_task.title or "").strip():
             api_task.title = item.summary
             modified = True
-        if (item.description or "").strip() != (api_task.content or "").strip():
-            api_task.content = item.description
+        if (item_content or "").strip() != (api_task.content or "").strip():
+            api_task.content = item_content or None
             modified = True
+
+        # Handle isAllDay based on due date type
+        is_all_day = (
+            item.due is not None
+            and not isinstance(item.due, datetime)
+            and isinstance(item.due, date)
+        )
+        if api_task.isAllDay != is_all_day:
+            api_task.isAllDay = is_all_day
+            modified = True
+
+        # Handle priority from metadata
+        if "priority" in item_metadata:
+            try:
+                new_priority = TaskPriority[item_metadata["priority"]]
+                if api_task.priority != new_priority:
+                    api_task.priority = new_priority
+                    modified = True
+            except KeyError:
+                pass  # Invalid priority, ignore
+        
+        # Handle tags from metadata
+        if "tags" in item_metadata:
+            if api_task.tags != item_metadata["tags"]:
+                api_task.tags = item_metadata["tags"]
+                modified = True
+        
+        # Handle parent_task_id from metadata
+        if "parent_task_id" in item_metadata:
+            if api_task.parentId != item_metadata["parent_task_id"]:
+                api_task.parentId = item_metadata["parent_task_id"]
+                modified = True
         
         # Handle due date comparison with proper type checking
         item_due_str = _format_date_for_comparison(item.due)
         api_due_str = _format_date_for_comparison(api_task.dueDate)
-        
+
         if item_due_str != api_due_str:
             api_task.dueDate = item.due
             modified = True
-            
+
         return api_task, modified
+
+    # Create new task
+    is_all_day = (
+        item.due is not None
+        and not isinstance(item.due, datetime)
+        and isinstance(item.due, date)
+    )
+
+    metadata = {}
+    if "priority" in item_metadata:
+        try:
+            metadata["priority"] = item_metadata["priority"]
+        except (KeyError, ValueError):
+            pass
+    
+    if "tags" in item_metadata:
+        metadata["tags"] = item_metadata["tags"]
+    
+    if "parent_task_id" in item_metadata:
+        metadata["parent_task_id"] = item_metadata["parent_task_id"]
+    
     return Task(
         projectId=projectId,
         title=item.summary,
-        content=item.description,
+        content=item_content or None,
         dueDate=item.due,
+        isAllDay=is_all_day,
+        priority=TaskPriority[metadata.get("priority", "NONE")]
+        if "priority" in metadata
+        else None,
+        parentId=metadata.get("parent_task_id"),
     ), modified
 
 
@@ -118,6 +225,23 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                     continue
 
                 for task in project_with_tasks.tasks:
+                    # Build metadata from task fields
+                    metadata = {}
+                    
+                    if task.priority and task.priority != TaskPriority.NONE:
+                        metadata["priority"] = task.priority.name
+                    
+                    if hasattr(task, "tags") and task.tags:
+                        metadata["tags"] = task.tags
+                    
+                    if task.parentId:
+                        metadata["parent_task_id"] = task.parentId
+                    
+                    # Format description with metadata
+                    formatted_description = _format_description_with_metadata(
+                        task.content or None, metadata
+                    )
+                    
                     tasks_to_add.insert(0,  # noqa: PERF401
                         TodoItem(
                             uid=task.id,
@@ -126,12 +250,11 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                             if task.status == TaskStatus.COMPLETED
                             else TodoItemStatus.NEEDS_ACTION,
                             due=task.dueDate,
-                            description=task.content or None,  # Don't use empty string
+                            description=formatted_description or None,
                         )
                     )
 
-            if tasks_to_add:
-                self._attr_todo_items = tasks_to_add
+            self._attr_todo_items = tasks_to_add
 
         super()._handle_coordinator_update()
 
@@ -140,8 +263,19 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
         if item.status != TodoItemStatus.NEEDS_ACTION:
             raise ValueError("Only active tasks may be created.")
         mapped_task, _ = _map_task(item, self._project_id)
-        await self.coordinator.api.create_task(mapped_task)
-        await self.coordinator.async_refresh()
+        created_task = await self.coordinator.api.create_task(mapped_task)
+
+        # Update local state optimistically
+        if self.coordinator.data:
+            for project_with_tasks in self.coordinator.data:
+                if project_with_tasks.project.id == self._project_id:
+                    if project_with_tasks.tasks is None:
+                        project_with_tasks.tasks = []
+                    project_with_tasks.tasks.append(created_task)
+                    self.coordinator.async_set_updated_data(self.coordinator.data)
+                    break
+
+        self.coordinator.async_request_refresh()
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update a To-do item."""
@@ -158,6 +292,23 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                             await self.coordinator.api.complete_task(
                                 projectId=self._project_id, taskId=item.uid
                             )
+                            # Update local state optimistically by removing the completed task
+                            if self.coordinator.data:
+                                for project_with_tasks in self.coordinator.data:
+                                    if (
+                                        project_with_tasks.project.id
+                                        == self._project_id
+                                        and project_with_tasks.tasks is not None
+                                    ):
+                                        project_with_tasks.tasks = [
+                                            t
+                                            for t in project_with_tasks.tasks
+                                            if t.id != item.uid
+                                        ]
+                                        self.coordinator.async_set_updated_data(
+                                            self.coordinator.data
+                                        )
+                                        break
                             return True
                         # else:
                         # Not supported by TickTick as they don't return completed tasks
@@ -176,15 +327,30 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
         )
 
         if await process_status_change():  # This should be changed if completing the task will support also changing description etc.
-            await self.coordinator.async_refresh()
+            self.coordinator.async_request_refresh()
             return
 
         mapped_task, is_modified = _map_task(item, self._project_id, api_task)
 
         if is_modified:
-            await self.coordinator.api.update_task(mapped_task)
+            updated_task = await self.coordinator.api.update_task(mapped_task)
+            # Update local state optimistically
+            if self.coordinator.data:
+                for project_with_tasks in self.coordinator.data:
+                    if (
+                        project_with_tasks.project.id == self._project_id
+                        and project_with_tasks.tasks is not None
+                    ):
+                        for i, task in enumerate(project_with_tasks.tasks):
+                            if task.id == updated_task.id:
+                                project_with_tasks.tasks[i] = updated_task
+                                self.coordinator.async_set_updated_data(
+                                    self.coordinator.data
+                                )
+                                break
+                        break
 
-        await self.coordinator.async_refresh()
+        self.coordinator.async_request_refresh()
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Delete a To-do item."""
@@ -194,7 +360,19 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
                 for uid in uids
             ]
         )
-        await self.coordinator.async_refresh()
+        # Update local state optimistically
+        if self.coordinator.data:
+            for project_with_tasks in self.coordinator.data:
+                if (
+                    project_with_tasks.project.id == self._project_id
+                    and project_with_tasks.tasks is not None
+                ):
+                    project_with_tasks.tasks = [
+                        t for t in project_with_tasks.tasks if t.id not in uids
+                    ]
+                    self.coordinator.async_set_updated_data(self.coordinator.data)
+                    break
+        self.coordinator.async_request_refresh()
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass update state from existing coordinator data."""

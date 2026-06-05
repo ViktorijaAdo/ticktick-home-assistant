@@ -16,6 +16,7 @@ from homeassistant.core import ServiceCall
 from homeassistant.util import dt as dt_util
 
 from .const import PROJECT_ID, TASK_ID
+from .coordinator import TickTickCoordinator
 from .ticktick_api_python.ticktick_api import TickTickAPIClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,19 +28,31 @@ async def handle_get_task(client: TickTickAPIClient) -> Callable:
     return await _create_handler(client.get_task, PROJECT_ID, TASK_ID)
 
 
-async def handle_create_task(client: TickTickAPIClient) -> Callable:
+async def handle_create_task(
+    client: TickTickAPIClient, coordinator: TickTickCoordinator
+) -> Callable:
     """Return a handler function for the 'create_task' endpoint."""
-    return await _create_handler(client.create_task, *(Task.get_arg_names()), type=Task)
+    return await _create_handler(
+        client.create_task, *(Task.get_arg_names()), type=Task, coordinator=coordinator
+    )
 
 
-async def handle_complete_task(client: TickTickAPIClient) -> Callable:
+async def handle_complete_task(
+    client: TickTickAPIClient, coordinator: TickTickCoordinator
+) -> Callable:
     """Return a handler function for the 'complete_task' endpoint."""
-    return await _create_handler(client.complete_task, PROJECT_ID, TASK_ID)
+    return await _create_handler(
+        client.complete_task, PROJECT_ID, TASK_ID, coordinator=coordinator
+    )
 
 
-async def handle_delete_task(client: TickTickAPIClient) -> Callable:
+async def handle_delete_task(
+    client: TickTickAPIClient, coordinator: TickTickCoordinator
+) -> Callable:
     """Return a handler function for the 'delete_task' endpoint."""
-    return await _create_handler(client.delete_task, PROJECT_ID, TASK_ID)
+    return await _create_handler(
+        client.delete_task, PROJECT_ID, TASK_ID, coordinator=coordinator
+    )
 
 
 async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callable:
@@ -97,8 +110,9 @@ async def handle_delete_task_with_subtasks(client: TickTickAPIClient) -> Callabl
 
     return handler
 
-
-async def handle_copy_task(client: TickTickAPIClient) -> Callable:
+async def handle_copy_task(
+    client: TickTickAPIClient, coordinator: TickTickCoordinator
+) -> Callable:
     """Return a handler function for the 'copy_task' service."""
 
     async def handler(call: ServiceCall) -> dict[str, Any]:
@@ -188,6 +202,7 @@ async def handle_copy_task(client: TickTickAPIClient) -> Callable:
                 return new_task_id
 
             new_root_id = await do_copy(source_task)
+            coordinator.async_request_refresh()
             return {"data": {"new_task_id": new_root_id}}
 
         except Exception as e:
@@ -197,8 +212,11 @@ async def handle_copy_task(client: TickTickAPIClient) -> Callable:
     return handler
 
 
-async def handle_update_task(client: TickTickAPIClient) -> Callable:
+async def handle_update_task(
+    client: TickTickAPIClient, coordinator: TickTickCoordinator
+) -> Callable:
     """Return a handler function for the 'update_task' endpoint."""
+
     async def handler(call: ServiceCall) -> dict[str, Any]:
         """Handle the update_task service call."""
         project_id = call.data.get(PROJECT_ID)
@@ -301,7 +319,9 @@ async def handle_update_task(client: TickTickAPIClient) -> Callable:
             
             # Update the task in TickTick
             response = await client.update_task(existing_task, returnAsJson=True)
-            
+
+            coordinator.async_request_refresh()
+
             return {"data": response}
         except Exception as e:
             _LOGGER.error("Error updating task: %s", str(e))
@@ -323,6 +343,7 @@ async def _create_handler(
     client_method: Callable[..., Awaitable[Any]],
     *arg_names: str,
     type: type[T] | None = None,
+    coordinator: TickTickCoordinator | None = None,
 ) -> Callable:
     """Create a reusable handler function for TickTick API endpoints."""
 
@@ -355,6 +376,9 @@ async def _create_handler(
                 response = await client_method(instance, returnAsJson=True)
             else:
                 response = await client_method(**args, returnAsJson=True)
+
+            if coordinator:
+                coordinator.async_request_refresh()
 
             return {"data": response}  # noqa: TRY300
         except Exception as e:  # noqa: BLE001

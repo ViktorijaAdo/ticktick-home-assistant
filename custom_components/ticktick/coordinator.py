@@ -14,6 +14,7 @@ from custom_components.ticktick.ticktick_api_python.ticktick_api import (
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 
@@ -36,6 +37,13 @@ class TickTickCoordinator(DataUpdateCoordinator[list[ProjectWithTasks]]):
             config_entry=entry,
             name="TickTick",
             update_interval=update_interval,
+            request_refresh_debouncer=Debouncer(
+                hass,
+                logger,
+                cooldown=5.0,
+                immediate=True,
+                function=self.async_refresh,
+            ),
         )
         self.api = api
         self._projects: list[Project] | None = None
