@@ -84,8 +84,11 @@ class Task(CheckListItem):
         @staticmethod
         def _handle_datetime(value):
             """Handle special cases for JSON serialization."""
-            if isinstance(value, (datetime, date)):
-                return value.strftime("%Y-%m-%dT%H:%M:%S%z") if isinstance(value, datetime) else value.strftime("%Y-%m-%dT00:00:00+0000")
+            if isinstance(value, datetime):
+                # Using strftime to ensure correct format without colons in timezone and without microseconds
+                return value.strftime("%Y-%m-%dT%H:%M:%S%z")
+            if isinstance(value, date):
+                return value.strftime("%Y-%m-%dT00:00:00+0000")
             if isinstance(value, Enum):
                 return value.value
             return value
