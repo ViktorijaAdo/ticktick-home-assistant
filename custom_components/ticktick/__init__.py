@@ -19,6 +19,7 @@ from .service_handlers import (
     handle_copy_task,
     handle_create_task,
     handle_delete_task,
+    handle_delete_task_with_subtasks,
     handle_get_projects,
     handle_get_task,
     handle_update_task,
@@ -117,6 +118,13 @@ async def register_services(
         DOMAIN,
         "delete_task",
         await handle_delete_task(tickTickApiClient, coordinator),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "delete_task_with_subtasks",
+        await handle_delete_task_with_subtasks(tickTickApiClient, coordinator),
         supports_response=SupportsResponse.OPTIONAL,
     )
 
