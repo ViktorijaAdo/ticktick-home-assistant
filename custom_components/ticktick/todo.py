@@ -45,6 +45,9 @@ def _format_date_for_comparison(date_value) -> str:
     if isinstance(date_value, datetime):
         # Convert datetime to string in a consistent format
         return date_value.isoformat()
+    if isinstance(date_value, date):
+        # Convert date to string in a consistent format
+        return date_value.isoformat()
     if isinstance(date_value, str):
         return date_value.strip()
     # For any other type, convert to string
@@ -77,12 +80,15 @@ def _extract_metadata_from_description(description: str) -> tuple[str, dict]:
         return description, {}
 
 
-def _format_description_with_metadata(content: str, metadata: dict) -> str:
+def _format_description_with_metadata(content: str | None, metadata: dict) -> str:
     """Format content and metadata into a description string.
     
     Returns:
         Formatted description with JSON metadata
     """
+    if content == "None":
+        content = ""
+
     if not metadata:
         return content or ""
     
@@ -151,10 +157,9 @@ def _map_task(
         if item_due_str != api_due_str:
             # If start date matches due date or is after new due date, update it too
             # to avoid API error (startDate cannot be after dueDate)
+            # If api_task.startDate is None, it might still exist on the server as identical to dueDate
             api_start_str = _format_date_for_comparison(api_task.startDate)
-            if api_task.startDate and (
-                api_start_str == api_due_str or api_start_str > item_due_str
-            ):
+            if api_start_str == api_due_str or (api_start_str != "" and api_start_str > item_due_str):
                 api_task.startDate = item.due
 
             api_task.dueDate = item.due

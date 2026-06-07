@@ -270,26 +270,27 @@ async def handle_update_task(
                 )
 
                 # Ensure startDate is not after new dueDate
-                if existing_task.startDate:
-                    current_start = existing_task.startDate
-                    current_due = existing_task.dueDate
+                current_start = existing_task.startDate
+                current_due = existing_task.dueDate
 
-                    # Convert to comparable strings if they are datetimes/dates
-                    def to_str(d):
-                        if isinstance(d, (datetime, date)):
-                            return d.isoformat()
-                        return str(d)
+                # Convert to comparable strings if they are datetimes/dates
+                def to_str(d):
+                    if d is None:
+                        return ""
+                    if isinstance(d, (datetime, date)):
+                        return d.isoformat()
+                    return str(d)
 
-                    start_str = to_str(current_start)
-                    due_str = to_str(current_due)
-                    new_due_str = to_str(new_due_date)
+                start_str = to_str(current_start)
+                due_str = to_str(current_due)
+                new_due_str = to_str(new_due_date)
 
-                    if start_str == due_str or start_str > new_due_str:
-                        existing_task.startDate = new_due_date
-                        _LOGGER.debug(
-                            "Automatically updating startDate to: %s",
-                            existing_task.startDate,
-                        )
+                if start_str == due_str or (start_str != "" and start_str > new_due_str):
+                    existing_task.startDate = new_due_date
+                    _LOGGER.debug(
+                        "Automatically updating startDate to: %s",
+                        existing_task.startDate,
+                    )
 
                 existing_task.dueDate = new_due_date
                 _LOGGER.debug("Updated task due date to: %s", existing_task.dueDate)
