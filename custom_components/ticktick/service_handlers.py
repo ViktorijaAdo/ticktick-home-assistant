@@ -263,10 +263,35 @@ async def handle_update_task(
                 due_date = call.data.get("dueDate")
                 due_date_time_zone = call.data.get("timeZone")
                 
-                if isinstance(due_date, str):
-                    existing_task.dueDate = _sanitize_date(due_date, due_date_time_zone)
-                else:
-                    existing_task.dueDate = due_date
+                new_due_date = (
+                    _sanitize_date(due_date, due_date_time_zone)
+                    if isinstance(due_date, str)
+                    else due_date
+                )
+
+                # Ensure startDate is not after new dueDate
+                if existing_task.startDate:
+                    current_start = existing_task.startDate
+                    current_due = existing_task.dueDate
+
+                    # Convert to comparable strings if they are datetimes/dates
+                    def to_str(d):
+                        if isinstance(d, (datetime, date)):
+                            return d.isoformat()
+                        return str(d)
+
+                    start_str = to_str(current_start)
+                    due_str = to_str(current_due)
+                    new_due_str = to_str(new_due_date)
+
+                    if start_str == due_str or start_str > new_due_str:
+                        existing_task.startDate = new_due_date
+                        _LOGGER.debug(
+                            "Automatically updating startDate to: %s",
+                            existing_task.startDate,
+                        )
+
+                existing_task.dueDate = new_due_date
                 _LOGGER.debug("Updated task due date to: %s", existing_task.dueDate)
             
             # Handle additional fields

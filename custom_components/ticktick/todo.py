@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from typing import Any
 from datetime import date, datetime
 
@@ -18,6 +19,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 # JSON metadata separator
 METADATA_SEPARATOR = " | _META_:"
@@ -65,7 +68,10 @@ def _extract_metadata_from_description(description: str) -> tuple[str, dict]:
     try:
         content, meta_str = description.rsplit(METADATA_SEPARATOR, 1)
         metadata = json.loads(meta_str)
-        return content.strip(), metadata
+        content = content.strip()
+        if content == "None":
+            content = ""
+        return content, metadata
     except (json.JSONDecodeError, ValueError):
         # If JSON parsing fails, return the whole description as content
         return description, {}
@@ -86,7 +92,7 @@ def _format_description_with_metadata(content: str, metadata: dict) -> str:
     if not filtered_metadata:
         return content or ""
     
-    return f"{content}{METADATA_SEPARATOR}{json.dumps(filtered_metadata)}"
+    return f"{content or ''}{METADATA_SEPARATOR}{json.dumps(filtered_metadata)}"
 
 
 def _map_task(
@@ -143,6 +149,14 @@ def _map_task(
         api_due_str = _format_date_for_comparison(api_task.dueDate)
 
         if item_due_str != api_due_str:
+            # If start date matches due date or is after new due date, update it too
+            # to avoid API error (startDate cannot be after dueDate)
+            api_start_str = _format_date_for_comparison(api_task.startDate)
+            if api_task.startDate and (
+                api_start_str == api_due_str or api_start_str > item_due_str
+            ):
+                api_task.startDate = item.due
+
             api_task.dueDate = item.due
             modified = True
 
@@ -263,7 +277,12 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
         if item.status != TodoItemStatus.NEEDS_ACTION:
             raise ValueError("Only active tasks may be created.")
         mapped_task, _ = _map_task(item, self._project_id)
-        created_task = await self.coordinator.api.create_task(mapped_task)
+        try:
+            created_task = await self.coordinator.api.create_task(mapped_task)
+        except Exception as e:
+            _LOGGER.error("Error creating TickTick task: %s", str(e))
+            self.coordinator.async_request_refresh()
+            return
 
         # Update local state optimistically
         if self.coordinator.data:
@@ -289,9 +308,17 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
 
                     if item.status != existing_item.status:
                         if item.status == TodoItemStatus.COMPLETED:
-                            await self.coordinator.api.complete_task(
-                                projectId=self._project_id, taskId=item.uid
-                            )
+                            try:
+                                await self.coordinator.api.complete_task(
+                                    projectId=self._project_id, taskId=item.uid
+                                )
+                            except Exception as e:
+                                _LOGGER.error(
+                                    "Error completing TickTick task %s: %s",
+                                    item.uid,
+                                    str(e),
+                                )
+                                return False
                             # Update local state optimistically by removing the completed task
                             if self.coordinator.data:
                                 for project_with_tasks in self.coordinator.data:
@@ -333,7 +360,13 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
         mapped_task, is_modified = _map_task(item, self._project_id, api_task)
 
         if is_modified:
-            updated_task = await self.coordinator.api.update_task(mapped_task)
+            try:
+                updated_task = await self.coordinator.api.update_task(mapped_task)
+            except Exception as e:
+                _LOGGER.error("Error updating TickTick task %s: %s", item.uid, str(e))
+                self.coordinator.async_request_refresh()
+                return
+
             # Update local state optimistically
             if self.coordinator.data:
                 for project_with_tasks in self.coordinator.data:
@@ -354,12 +387,17 @@ class TickTickTodoListEntity(CoordinatorEntity[TickTickCoordinator], TodoListEnt
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Delete a To-do item."""
-        await asyncio.gather(
-            *[
-                self.coordinator.api.delete_task(projectId=self._project_id, taskId=uid)
-                for uid in uids
-            ]
-        )
+        try:
+            await asyncio.gather(
+                *[
+                    self.coordinator.api.delete_task(
+                        projectId=self._project_id, taskId=uid
+                    )
+                    for uid in uids
+                ]
+            )
+        except Exception as e:
+            _LOGGER.error("Error deleting TickTick tasks %s: %s", uids, str(e))
         # Update local state optimistically
         if self.coordinator.data:
             for project_with_tasks in self.coordinator.data:
