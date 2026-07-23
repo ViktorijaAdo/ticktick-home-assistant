@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import date, datetime
 import logging
 from typing import Any, TypeVar
 from zoneinfo import ZoneInfo
